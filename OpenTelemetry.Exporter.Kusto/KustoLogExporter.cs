@@ -1,11 +1,11 @@
 ﻿using Kusto.Cloud.Platform.Utils;
 using Kusto.Data.Common;
+using Kusto.Data.Ingestion;
 using Kusto.Ingest;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Logs;
 using System;
 using System.IO;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -27,6 +27,7 @@ namespace OpenTelemetry.Exporter.Kusto
     {
         #region Constants
         private const int c_bufferSize = 65360;
+        private const string c_logTypeFullName = "Microsoft.Extensions.Logging.FormattedLogValues";
         private const string c_defaultDatabaseName = "Default";
         private const string c_defaultTableName = "Logs";
         private const IngestionReportLevel c_defaultReportLevel = IngestionReportLevel.FailuresOnly;
@@ -74,7 +75,7 @@ namespace OpenTelemetry.Exporter.Kusto
             {
                 Format = DataSourceFormat.csv,
                 ReportLevel = m_options.ReportLevel ?? c_defaultReportLevel,
-                ReportMethod = m_options.ReportMethod ?? c_defaultReportMethod,
+                ReportMethod = m_options.ReportMethod ?? c_defaultReportMethod
             };
         }
         #endregion
@@ -115,13 +116,14 @@ namespace OpenTelemetry.Exporter.Kusto
         #region Private Methods
         private void FlushIfNeeded(bool force = false)
         {
-            if (force || m_bufferStream.Value.Position == c_bufferSize)
+            if ((force || m_bufferStream.Value.Position == c_bufferSize) && m_bufferStream.Value.Position > 0)
             {
-                m_bufferStream.Value.Seek(0, SeekOrigin.Begin);
-                m_ingestClient.IngestFromStreamAsync(m_bufferStream.Value, m_ingestionOptions, new StreamSourceOptions
+                var size = m_bufferStream.Value.Position;
+                var stream = new MemoryStream(m_buffer.Value, 0, (int)size  - 2, writable: false);
+                m_ingestClient.IngestFromStreamAsync(stream, m_ingestionOptions, new StreamSourceOptions
                 {
-                    Size = m_bufferStream.Value.Position,
-                    LeaveOpen = true
+                    Size = size,
+                    LeaveOpen = false
                 }).ResultEx();
 
                 m_bufferStream.Value.Seek(0, SeekOrigin.Begin);
@@ -129,16 +131,34 @@ namespace OpenTelemetry.Exporter.Kusto
         }
 
         private bool WriteCsvRecord(CsvWriter csvWriter, LogRecord record)
-        {            
-            var result = csvWriter.WriteField(record.Timestamp.ToString("O"));
+        {
+            var result = csvWriter.WriteField(record.Timestamp.FastToString());
             result = result && csvWriter.WriteField(record.CategoryName);
             result = result && csvWriter.WriteField(record.EventId.Id.ToString());
             result = result && csvWriter.WriteField(record.EventId.Name);
             result = result && csvWriter.WriteField(FastToString(record.LogLevel));
-            result = result && csvWriter.WriteField(record.FormattedMessage);
-            result = result && csvWriter.WriteField(JsonSerializer.Serialize(record.State, s_serializerOptions));
-            csvWriter.CompleteRecord();
-            csvWriter.Flush();
+            result = result && csvWriter.WriteField(record.TraceId.ToString());
+            result = result && csvWriter.WriteField(record.SpanId.ToString());
+            if (record.State == null)
+            {
+                result = result && csvWriter.WriteField(string.Empty);
+            }
+            else if (string.Equals(record.State.GetType().FullName, c_logTypeFullName))
+            {
+                result = result && csvWriter.WriteField(record.State.ToString());
+            }
+            else
+            {
+                result = result && csvWriter.WriteField(JsonSerializer.Serialize(record.State, s_serializerOptions));
+            }
+
+            result = result && csvWriter.WriteField(record.Exception?.Message ?? string.Empty);
+
+            if (result)
+            {
+                csvWriter.CompleteRecord();
+                csvWriter.Flush();
+            }
 
             return result;
         }
@@ -152,7 +172,7 @@ namespace OpenTelemetry.Exporter.Kusto
             }
 
             m_bufferStream.Value.Seek(0, SeekOrigin.Begin);
-            return new CsvWriter(new StreamWriter(m_bufferStream.Value, encoding: Encoding.UTF8, bufferSize: c_bufferSize, leaveOpen: true));
+            return new CsvWriter(new StreamWriter(m_bufferStream.Value, bufferSize: c_bufferSize, leaveOpen: true));
         }
 
         private string FastToString(LogLevel level)

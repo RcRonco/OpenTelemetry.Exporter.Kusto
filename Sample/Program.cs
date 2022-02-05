@@ -1,6 +1,7 @@
 ﻿using Kusto.Data;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter.Kusto;
+using OpenTelemetry.Logs;
 using System;
 
 namespace Sample
@@ -16,7 +17,7 @@ namespace Sample
                     options.AddKustoLogExporter(kustoOptions =>
                     {
                         kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-oteltest.eastus.kusto.windows.net/")
-                            .WithAadUserPromptAuthentication();
+                             .WithAadUserPromptAuthentication();
                         kustoOptions.DatabaseName = "OTel";
                     });
                 });
@@ -28,7 +29,11 @@ namespace Sample
                 FieldA = "Some text",
                 FieldB = Guid.NewGuid(),
                 FieldC = 123
-            }, exception: null, (state, ex) => string.Empty);
+            }, exception: null, (state, ex) => "SomeText");
+            logger.LogInformation("Some info message with param {0}", 123);
+            logger.LogWarning("Some warning message with param {0}", 1.23);
+            logger.LogCritical("Some critical message with param {0}", Guid.NewGuid());
+            logger.LogCritical(new EventId(3, "CriticalSampleEvent"), new InvalidOperationException("my exception message"), "Some critical message with param {0}", 2);
             Console.ReadLine();
         }
     }
