@@ -24,17 +24,13 @@ namespace OpenTelemetry.Exporter.Kusto
         #region Constants
         private const int c_bufferSize = 65360;
         private const string c_logTypeFullName = "Microsoft.Extensions.Logging.FormattedLogValues";
-        private const string c_defaultDatabaseName = "Default";
-        private const string c_defaultTableName = "Logs";
-        private const IngestionReportLevel c_defaultReportLevel = IngestionReportLevel.FailuresOnly;
-        private const IngestionReportMethod c_defaultReportMethod = IngestionReportMethod.Queue;
         #endregion
 
         #region Private Members
         private readonly string m_resource;
         private readonly KustoLogExporterOptions m_options;
         private readonly IKustoIngestClient m_ingestClient;
-        private readonly KustoQueuedIngestionProperties m_ingestionOptions;
+        private readonly KustoIngestionProperties m_ingestionOptions;
 
         private static readonly Dictionary<string, object> s_emptyAttributes = new Dictionary<string, object>(0);
         private static readonly ThreadLocal<byte[]> m_buffer = new ThreadLocal<byte[]>(() => null);
@@ -53,43 +49,14 @@ namespace OpenTelemetry.Exporter.Kusto
         public KustoLogExporter(KustoLogExporterOptions options)
         {
             Ensure.ArgIsNotNull(options, nameof(options));
-            Ensure.ArgIsNotNull(options.ConnectionString, nameof(options.ConnectionString));
-            Ensure.IsTrue(options.ConnectionString.IsValid(out var errorMessage), errorMessage);
-
+            
             m_resource = ParentProvider.GetResource().ToKustoOTelString();
 
             // Prepare options
             m_options = options;
-            if (string.IsNullOrEmpty(m_options.DatabaseName))
-            {
-                m_options.DatabaseName = c_defaultDatabaseName; // TODO: Proper name or should throw?
-            }
-
-            if (string.IsNullOrEmpty(m_options.TableName))
-            {
-                m_options.TableName = c_defaultTableName;
-            }
-
+            
             // Prepare ingestion client
-            // Todo: provide an option for different client to support
-            m_ingestClient = KustoIngestFactory.CreateQueuedIngestClient(m_options.ConnectionString);
-            IngestionMapping mapping = null;
-            if (string.IsNullOrEmpty(m_options.MappingReference))
-            {
-                mapping = new IngestionMapping
-                {
-                    IngestionMappingKind = IngestionMappingKind.Csv,
-                    IngestionMappingReference = m_options.MappingReference
-                };
-            }
-
-            m_ingestionOptions = new KustoQueuedIngestionProperties(m_options.DatabaseName, m_options.TableName)
-            {
-                Format = DataSourceFormat.csv,
-                ReportLevel = m_options.ReportLevel ?? c_defaultReportLevel,
-                ReportMethod = m_options.ReportMethod ?? c_defaultReportMethod,
-                IngestionMapping = mapping
-            };
+            (m_ingestClient, m_ingestionOptions) = KustoHelper.CreateIngestClient(options);
         }
         #endregion
 

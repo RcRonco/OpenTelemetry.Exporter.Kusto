@@ -12,6 +12,8 @@ namespace OpenTelemetry.Exporter.Kusto
 
             var kustoOptions = new KustoLogExporterOptions();
             configure?.Invoke(kustoOptions);
+            kustoOptions.ValidateOrThrow();
+
             var exporter = new KustoLogExporter(kustoOptions);
             
             return options.AddProcessor(new BatchLogRecordExportProcessor(exporter));
