@@ -19,6 +19,8 @@ namespace Sample
                         kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-oteltest.eastus.kusto.windows.net/")
                              .WithAadUserPromptAuthentication();
                         kustoOptions.DatabaseName = "OTel";
+                        kustoOptions.TableName = "OTelLogs";
+                        kustoOptions.MappingReference = "OTelLogsMapping";
                     });
                 });
             });

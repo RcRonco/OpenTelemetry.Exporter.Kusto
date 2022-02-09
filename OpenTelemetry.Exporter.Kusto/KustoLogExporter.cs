@@ -4,7 +4,9 @@ using Kusto.Data.Ingestion;
 using Kusto.Ingest;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -14,14 +16,8 @@ using System.Threading;
 namespace OpenTelemetry.Exporter.Kusto
 {
     /// <summary>
-    /// Generates table with schema:
-    /// Timestamp - DateTime
-    /// Category - String
-    /// EventId - Int
-    /// EventName - String
-    /// Level - String
-    /// Message - String
-    /// Additional Columns
+    /// Table schema should match OpenTelemetry Log spec:
+    /// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/logs/data-model.md#log-and-event-record-definition
     /// </summary>
     public class KustoLogExporter : BaseExporter<LogRecord>
     {
@@ -35,11 +31,12 @@ namespace OpenTelemetry.Exporter.Kusto
         #endregion
 
         #region Private Members
+        private readonly string m_resource;
         private readonly KustoLogExporterOptions m_options;
         private readonly IKustoIngestClient m_ingestClient;
         private readonly KustoQueuedIngestionProperties m_ingestionOptions;
-        
 
+        private static readonly Dictionary<string, object> s_emptyAttributes = new Dictionary<string, object>(0);
         private static readonly ThreadLocal<byte[]> m_buffer = new ThreadLocal<byte[]>(() => null);
         private static readonly ThreadLocal<MemoryStream> m_bufferStream = new ThreadLocal<MemoryStream>(() => null);
         private static readonly JsonSerializerOptions s_serializerOptions = new JsonSerializerOptions
@@ -59,6 +56,9 @@ namespace OpenTelemetry.Exporter.Kusto
             Ensure.ArgIsNotNull(options.ConnectionString, nameof(options.ConnectionString));
             Ensure.IsTrue(options.ConnectionString.IsValid(out var errorMessage), errorMessage);
 
+            m_resource = ParentProvider.GetResource().ToKustoOTelString();
+
+            // Prepare options
             m_options = options;
             if (string.IsNullOrEmpty(m_options.DatabaseName))
             {
@@ -70,12 +70,25 @@ namespace OpenTelemetry.Exporter.Kusto
                 m_options.TableName = c_defaultTableName;
             }
 
+            // Prepare ingestion client
+            // Todo: provide an option for different client to support
             m_ingestClient = KustoIngestFactory.CreateQueuedIngestClient(m_options.ConnectionString);
+            IngestionMapping mapping = null;
+            if (string.IsNullOrEmpty(m_options.MappingReference))
+            {
+                mapping = new IngestionMapping
+                {
+                    IngestionMappingKind = IngestionMappingKind.Csv,
+                    IngestionMappingReference = m_options.MappingReference
+                };
+            }
+
             m_ingestionOptions = new KustoQueuedIngestionProperties(m_options.DatabaseName, m_options.TableName)
             {
                 Format = DataSourceFormat.csv,
                 ReportLevel = m_options.ReportLevel ?? c_defaultReportLevel,
-                ReportMethod = m_options.ReportMethod ?? c_defaultReportMethod
+                ReportMethod = m_options.ReportMethod ?? c_defaultReportMethod,
+                IngestionMapping = mapping
             };
         }
         #endregion
@@ -104,6 +117,7 @@ namespace OpenTelemetry.Exporter.Kusto
                 catch (Exception ex)
                 {
                     // TODO: write event for exception
+                    KustoOtelEventSource.Log.LogExporterError(ex.ToStringEx());
                     result = ExportResult.Failure;
                 }
             }
@@ -132,13 +146,18 @@ namespace OpenTelemetry.Exporter.Kusto
 
         private bool WriteCsvRecord(CsvWriter csvWriter, LogRecord record)
         {
-            var result = csvWriter.WriteField(record.Timestamp.FastToString());
-            result = result && csvWriter.WriteField(record.CategoryName);
-            result = result && csvWriter.WriteField(record.EventId.Id.ToString());
-            result = result && csvWriter.WriteField(record.EventId.Name);
-            result = result && csvWriter.WriteField(FastToString(record.LogLevel));
-            result = result && csvWriter.WriteField(record.TraceId.ToString());
-            result = result && csvWriter.WriteField(record.SpanId.ToString());
+            var result = csvWriter.WriteField(record.Timestamp.ToKustoOTelString(m_options.UseKustoDateTime));             // TimeStamp  (datetime/uint64)
+            result = result && csvWriter.WriteField(m_resource);                                                           // Resource   (dynamic - KeyValue)
+            result = result && csvWriter.WriteField(record.CategoryName);                                                  // Category   (string)
+            result = result && csvWriter.WriteField(record.EventId.Name);                                                  // EventName  (string)
+            result = result && csvWriter.WriteField(record.EventId.Id.ToString());                                         // EventId    (int32)
+            result = result && csvWriter.WriteField(record.LogLevel.ToSeverityString());                                   // Level      (string)
+            result = result && csvWriter.WriteField(record.TraceId.ToString());                                            // TraceId    (Guid/string)
+            result = result && csvWriter.WriteField(record.SpanId.ToString());                                             // SpanId     (Guid/string)
+            result = result && csvWriter.WriteField(record.TraceFlags.ToString());                                         // TraceFlags (string)
+            result = result && csvWriter.WriteField(JsonSerializer.Serialize(GetAttributes(record), s_serializerOptions)); // Attributes (dynamic - KeyValue)
+
+            // Payload (string)
             if (record.State == null)
             {
                 result = result && csvWriter.WriteField(string.Empty);
@@ -151,8 +170,6 @@ namespace OpenTelemetry.Exporter.Kusto
             {
                 result = result && csvWriter.WriteField(JsonSerializer.Serialize(record.State, s_serializerOptions));
             }
-
-            result = result && csvWriter.WriteField(record.Exception?.Message ?? string.Empty);
 
             if (result)
             {
@@ -175,19 +192,25 @@ namespace OpenTelemetry.Exporter.Kusto
             return new CsvWriter(new StreamWriter(m_bufferStream.Value, bufferSize: c_bufferSize, leaveOpen: true));
         }
 
-        private string FastToString(LogLevel level)
+        private IReadOnlyDictionary<string, object> GetAttributes(LogRecord record)
         {
-            switch (level)
+            Dictionary<string, object> attributes;
+            if (record.Exception == null)
             {
-                case LogLevel.Trace: return "Trace";
-                case LogLevel.Debug: return "Debug";
-                case LogLevel.Information: return "Information";
-                case LogLevel.Warning: return "Warning";
-                case LogLevel.Error: return "Error";
-                case LogLevel.Critical: return "Critical";
-                case LogLevel.None:
-                default: return "None";
+                attributes = s_emptyAttributes;
             }
+            else
+            {
+                // Todo: Reduce dictionary allocations
+                attributes = new Dictionary<string, object>(3)
+                {
+                    ["exception.type"] = record.Exception.GetType().FullName,
+                    ["exception.message"] = record.Exception.Message,
+                    ["exception.stacktrace"] = record.Exception.ToString()
+                };
+            }
+
+            return attributes;
         }
         #endregion
     }
