@@ -1,4 +1,8 @@
 # OpenTelemetry.Exporter.Kusto (WIP)
+
+:warning: **THIS IS A PRESONAL PROJECT**
+
+
 OpenTelemtry exporter for Kusto (Azure Data Explorer)
 
 ## Settings up Kusto Cluster
