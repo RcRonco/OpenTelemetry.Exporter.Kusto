@@ -2,7 +2,9 @@
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter.Kusto;
 using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
 using System;
+using System.Collections.Generic;
 
 namespace Sample
 {
@@ -14,14 +16,22 @@ namespace Sample
             {
                 builder.AddOpenTelemetry(options =>
                 {
-                    options.AddKustoLogExporter(kustoOptions =>
-                    {
-                        kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-oteltest.eastus.kusto.windows.net/")
-                             .WithAadUserPromptAuthentication();
-                        kustoOptions.DatabaseName = "OTel";
-                        kustoOptions.TableName = "OTelLogs";
-                        kustoOptions.MappingReference = "OTelLogsMapping";
-                    });
+                    var resourceBuilder = ResourceBuilder.CreateDefault()
+                       .AddService("ServiceName", "ServiceNamespace", "1.0.0.1-rc")
+                       .AddAttributes(new Dictionary<string, object>(1)
+                       {
+                           ["additionalLabel"] = "labelValue"
+                       });
+
+                    options.SetResourceBuilder(resourceBuilder)
+                           .AddKustoLogExporter(kustoOptions =>
+                            {
+                                kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-relogseus.eastus.kusto.windows.net")
+                                     .WithAadApplicationKeyAuthentication("d443fbc0-3f4f-4f9f-ad3b-5766e13b15d1", "u6G7Q~SN6eB2RSUcDPDUDVAqVtQpYQyFmwqwr", "4523672d-a7c0-45ec-a446-57f746ff3684");
+                                kustoOptions.DatabaseName = "OTel";
+                                kustoOptions.TableName = "OTelLogs";
+                                kustoOptions.MappingReference = "OTelLogsMapping";
+                            });
                 });
             });
 
@@ -36,6 +46,8 @@ namespace Sample
             logger.LogWarning("Some warning message with param {0}", 1.23);
             logger.LogCritical("Some critical message with param {0}", Guid.NewGuid());
             logger.LogCritical(new EventId(3, "CriticalSampleEvent"), new InvalidOperationException("my exception message"), "Some critical message with param {0}", 2);
+            
+            Console.WriteLine("Done writing logs, waiting for exporter");
             Console.ReadLine();
         }
     }

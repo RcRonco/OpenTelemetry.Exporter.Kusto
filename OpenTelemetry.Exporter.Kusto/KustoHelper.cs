@@ -20,15 +20,12 @@ namespace OpenTelemetry.Exporter.Kusto
         {
             IKustoIngestClient client;
             KustoIngestionProperties properties;
-            IngestionMapping mapping = null;
+            IngestionMapping mapping = new IngestionMapping();
             
             if (string.IsNullOrEmpty(options.MappingReference))
             {
-                mapping = new IngestionMapping
-                {
-                    IngestionMappingKind = IngestionMappingKind.Csv,
-                    IngestionMappingReference = options.MappingReference
-                };
+                mapping.IngestionMappingReference = options.MappingReference;
+                mapping.IngestionMappingKind = IngestionMappingKind.Csv;
             }
 
             if (options.EnableStreamIngestion)

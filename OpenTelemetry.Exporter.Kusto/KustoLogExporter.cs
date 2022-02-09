@@ -27,7 +27,6 @@ namespace OpenTelemetry.Exporter.Kusto
         #endregion
 
         #region Private Members
-        private readonly string m_resource;
         private readonly KustoLogExporterOptions m_options;
         private readonly IKustoIngestClient m_ingestClient;
         private readonly KustoIngestionProperties m_ingestionOptions;
@@ -50,8 +49,6 @@ namespace OpenTelemetry.Exporter.Kusto
         {
             Ensure.ArgIsNotNull(options, nameof(options));
             
-            m_resource = ParentProvider.GetResource().ToKustoOTelString();
-
             // Prepare options
             m_options = options;
             
@@ -114,7 +111,7 @@ namespace OpenTelemetry.Exporter.Kusto
         private bool WriteCsvRecord(CsvWriter csvWriter, LogRecord record)
         {
             var result = csvWriter.WriteField(record.Timestamp.ToKustoOTelString(m_options.UseKustoDateTime));             // TimeStamp  (datetime/uint64)
-            result = result && csvWriter.WriteField(m_resource);                                                           // Resource   (dynamic - KeyValue)
+            result = result && csvWriter.WriteField(ParentProvider.GetResource().ToKustoOTelString());                     // Resource   (dynamic - KeyValue)
             result = result && csvWriter.WriteField(record.CategoryName);                                                  // Category   (string)
             result = result && csvWriter.WriteField(record.EventId.Name);                                                  // EventName  (string)
             result = result && csvWriter.WriteField(record.EventId.Id.ToString());                                         // EventId    (int32)
