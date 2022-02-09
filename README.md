@@ -44,31 +44,47 @@ OpenTelemtry exporter for Kusto (Azure Data Explorer)
 ```csharp
 public void Sample()
 {
-	using var loggerFactory = LoggerFactory.Create(builder =>
+    using var loggerFactory = LoggerFactory.Create(builder =>
     {
-        builder.AddOpenTelemetry(options =>
-        {
-            options.AddKustoLogExporter(kustoOptions =>
-            {
-                kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-{clustername}.{region}.kusto.windows.net/").WithAadUserPromptAuthentication();
-                kustoOptions.DatabaseName = "OTel";
-                kustoOptions.TableName = "OTelLogs";
-                kustoOptions.MappingReference = "OTelLogsMapping"
-            });
-        });
+    	var resourceBuilder = ResourceBuilder.CreateDefault()
+	       .AddService("ServiceName", "ServiceNamespace", "1.0.0.1-rc")
+	       .AddAttributes(new Dictionary<string, object>(1)
+	       {
+		   ["additionalLabel"] = "labelValue"
+	       });
+	       
+        options.SetResourceBuilder(resourceBuilder)
+	   .AddKustoLogExporter(kustoOptions =>
+	    {
+		kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-{clustername}.{region}.kusto.windows.net/").WithAadUserPromptAuthentication();
+		kustoOptions.DatabaseName = "OTel";
+		kustoOptions.TableName = "OTelLogs";
+		kustoOptions.MappingReference = "OTelLogsMapping";
+	    });
     });
 
     var logger = loggerFactory.CreateLogger<Program>();
     logger.Log(LogLevel.Error, new EventId(1, "SampleEvent"), new
     {
-        FieldA = "Some text",
-        FieldB = Guid.NewGuid(),
-        FieldC = 123
+	FieldA = "Some text",
+	FieldB = Guid.NewGuid(),
+	FieldC = 123
     }, exception: null, (state, ex) => "SomeText");
     logger.LogInformation("Some info message with param {0}", 123);
     logger.LogWarning("Some warning message with param {0}", 1.23);
     logger.LogCritical("Some critical message with param {0}", Guid.NewGuid());
     logger.LogCritical(new EventId(3, "CriticalSampleEvent"), new InvalidOperationException("my exception message"), "Some critical message with param {0}", 2);
+
+    Console.WriteLine("Done writing logs, waiting for exporter");
+    Console.ReadLine();
 }
 
 ```
+
+#### Execute Query:
+```kql
+OTelLogs
+| evaluate bag_unpack(Resource, 'Resource.')
+```
+
+![Query result](https://raw.githubusercontent.com/RcRonco/OpenTelemetry.Exporter.Kusto/master/Docs/images/LogsQuerySample.jpg)
