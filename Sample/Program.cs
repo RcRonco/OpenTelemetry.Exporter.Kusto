@@ -26,8 +26,8 @@ namespace Sample
                     options.SetResourceBuilder(resourceBuilder)
                            .AddKustoLogExporter(kustoOptions =>
                             {
-                                kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-relogseus.eastus.kusto.windows.net")
-                                     .WithAadApplicationKeyAuthentication("d443fbc0-3f4f-4f9f-ad3b-5766e13b15d1", "u6G7Q~SN6eB2RSUcDPDUDVAqVtQpYQyFmwqwr", "4523672d-a7c0-45ec-a446-57f746ff3684");
+                                kustoOptions.ConnectionString = new KustoConnectionStringBuilder("https://ingest-{clustername}.{region}.kusto.windows.net/")
+                                    .WithAadUserPromptAuthentication();
                                 kustoOptions.DatabaseName = "OTel";
                                 kustoOptions.TableName = "OTelLogs";
                                 kustoOptions.MappingReference = "OTelLogsMapping";
